@@ -1,5 +1,4 @@
-import { extname, parse } from "path";
-import imageType from "image-type";
+import { getExtension, parseVaultPath } from "./path-utils.js";
 
 export interface ResolvedImageFileMetadata {
   originalName: string;
@@ -33,14 +32,43 @@ function sniffSvg(bytes: Uint8Array) {
   return normalized.startsWith("<svg") || normalized.startsWith("<?xml") && normalized.includes("<svg");
 }
 
-export async function detectImageMetadata(bytes: Uint8Array) {
-  const detected = await imageType(bytes);
-  if (detected) {
-    const ext = normalizeDetectedExtension(detected.ext);
-    return {
-      ext,
-      mime: MIME_BY_EXTENSION[ext] || detected.mime,
-    };
+function startsWithBytes(bytes: Uint8Array, signature: number[]) {
+  return signature.every((value, index) => bytes[index] === value);
+}
+
+export function detectImageMetadata(bytes: Uint8Array) {
+  if (startsWithBytes(bytes, [0xff, 0xd8, 0xff])) {
+    return { ext: "jpg", mime: MIME_BY_EXTENSION.jpg };
+  }
+  if (startsWithBytes(bytes, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) {
+    return { ext: "png", mime: MIME_BY_EXTENSION.png };
+  }
+  if (startsWithBytes(bytes, [0x47, 0x49, 0x46, 0x38])) {
+    return { ext: "gif", mime: MIME_BY_EXTENSION.gif };
+  }
+  if (startsWithBytes(bytes, [0x42, 0x4d])) {
+    return { ext: "bmp", mime: MIME_BY_EXTENSION.bmp };
+  }
+  if (
+    startsWithBytes(bytes, [0x52, 0x49, 0x46, 0x46]) &&
+    bytes[8] === 0x57 &&
+    bytes[9] === 0x45 &&
+    bytes[10] === 0x42 &&
+    bytes[11] === 0x50
+  ) {
+    return { ext: "webp", mime: MIME_BY_EXTENSION.webp };
+  }
+  if (
+    bytes[4] === 0x66 &&
+    bytes[5] === 0x74 &&
+    bytes[6] === 0x79 &&
+    bytes[7] === 0x70 &&
+    bytes[8] === 0x61 &&
+    bytes[9] === 0x76 &&
+    bytes[10] === 0x69 &&
+    bytes[11] === 0x66
+  ) {
+    return { ext: "avif", mime: MIME_BY_EXTENSION.avif };
   }
 
   if (sniffSvg(bytes)) {
@@ -53,14 +81,14 @@ export async function detectImageMetadata(bytes: Uint8Array) {
   return null;
 }
 
-export async function resolveImageFileMetadata(originalName: string, bytes: Uint8Array): Promise<ResolvedImageFileMetadata | null> {
-  const detected = await detectImageMetadata(bytes);
+export function resolveImageFileMetadata(originalName: string, bytes: Uint8Array): ResolvedImageFileMetadata | null {
+  const detected = detectImageMetadata(bytes);
   if (!detected) {
     return null;
   }
 
-  const parsed = parse(originalName || "image");
-  const originalExtension = extname(parsed.base).replace(/^\./, "").toLowerCase();
+  const parsed = parseVaultPath(originalName || "image");
+  const originalExtension = getExtension(parsed.base).replace(/^\./, "").toLowerCase();
   const nextExtension = detected.ext;
   const baseName = parsed.name || parsed.base || "image";
   const extensionChanged =

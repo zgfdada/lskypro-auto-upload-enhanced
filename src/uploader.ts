@@ -1,4 +1,4 @@
-import { App } from "obsidian";
+import { App, requestUrl } from "obsidian";
 import { PluginSettings } from "./setting";
 import { resolveImageFileMetadata } from "./image-file";
 import { getUploadConversionPlan } from "./upload-policy";
@@ -37,25 +37,60 @@ export class LskyProUploader {
   }
 
   getRequestOptions(file: File) {
-    const headers = new Headers();
-    headers.append("Accept", "application/json");
+    return this.getMultipartRequestOptions(file);
+  }
 
-    const formdata = new FormData();
+  async getMultipartRequestOptions(file: File) {
+    const boundary = `----obsidian-lsky-${Date.now().toString(36)}`;
+    const parts: Uint8Array[] = [];
+    const encoder = new TextEncoder();
+    const appendText = (value: string) => parts.push(encoder.encode(value));
+    const appendField = (name: string, value: string) => {
+      appendText(`--${boundary}\r\n`);
+      appendText(`Content-Disposition: form-data; name="${name}"\r\n\r\n`);
+      appendText(`${value}\r\n`);
+    };
+    const appendFile = async (name: string) => {
+      appendText(`--${boundary}\r\n`);
+      appendText(`Content-Disposition: form-data; name="${name}"; filename="${file.name}"\r\n`);
+      appendText(`Content-Type: ${file.type || "application/octet-stream"}\r\n\r\n`);
+      parts.push(new Uint8Array(await file.arrayBuffer()));
+      appendText("\r\n");
+    };
+
     if (this.isLegacyApi) {
-      headers.append("token", this.lskyToken);
-      formdata.append("image", file);
+      await appendFile("image");
     } else {
-      headers.append("Authorization", this.lskyToken);
-      formdata.append("file", file);
+      await appendFile("file");
       if (this.settings.strategy_id) {
-        formdata.append("strategy_id", this.settings.strategy_id);
+        appendField("strategy_id", this.settings.strategy_id);
       }
+    }
+    appendText(`--${boundary}--\r\n`);
+
+    const length = parts.reduce((sum, part) => sum + part.byteLength, 0);
+    const body = new Uint8Array(length);
+    let offset = 0;
+    for (const part of parts) {
+      body.set(part, offset);
+      offset += part.byteLength;
+    }
+
+    const headers: Record<string, string> = {
+      Accept: "application/json",
+      "Content-Type": `multipart/form-data; boundary=${boundary}`,
+    };
+    if (this.isLegacyApi) {
+      headers.token = this.lskyToken;
+    } else {
+      headers.Authorization = this.lskyToken;
     }
 
     return {
-      method: "POST",
+      url: this.lskyUrl,
+      method: "POST" as const,
       headers,
-      body: formdata,
+      body: body.buffer,
     };
   }
 
@@ -97,15 +132,14 @@ export class LskyProUploader {
 
   async promiseRequest(file: File): Promise<UploadResult> {
     try {
-      const response = await fetch(this.lskyUrl, this.getRequestOptions(file));
-      const value = await response.json();
+      const response = await requestUrl(await this.getMultipartRequestOptions(file));
+      const value = response.json;
       const normalized = this.normalizeResponse(value);
       if (normalized.code !== 0) {
         normalized.msg = `${normalized.msg} [file=${file.name}, type=${file.type || "unknown"}, size=${file.size}]`;
       }
       return normalized;
     } catch (error: any) {
-      console.log("error", error);
       return {
         code: -1,
         msg: error?.message || String(error),
@@ -151,7 +185,7 @@ export class LskyProUploader {
         img.src = objectUrl;
       });
 
-      const canvas = document.createElement("canvas");
+      const canvas = activeDocument.createElement("canvas");
       canvas.width = image.naturalWidth || image.width;
       canvas.height = image.naturalHeight || image.height;
       const context = canvas.getContext("2d");
@@ -160,7 +194,7 @@ export class LskyProUploader {
       }
       context.drawImage(image, 0, 0);
       const convertedBlob = await new Promise<Blob>((resolve, reject) => {
-        canvas.toBlob((value) => {
+        canvas.toBlob((value: Blob | null) => {
           if (value) {
             resolve(value);
             return;
@@ -176,11 +210,11 @@ export class LskyProUploader {
 
   async createFileObjectFromPath(filePath: string): Promise<File> {
     if (filePath.startsWith("https://") || filePath.startsWith("http://")) {
-      const response = await fetch(filePath);
-      if (!response.ok) {
-        throw new Error(`Failed to download remote image: ${response.status} ${response.statusText}`);
+      const response = await requestUrl({ url: filePath });
+      if (response.status < 200 || response.status >= 300) {
+        throw new Error(`Failed to download remote image: ${response.status}`);
       }
-      const bytes = new Uint8Array(await response.arrayBuffer());
+      const bytes = new Uint8Array(response.arrayBuffer);
       const originalName = decodeURI(filePath.split("/").pop()?.split("?")[0].split("#")[0] || "image");
       return this.createNormalizedFile(bytes, originalName);
     }

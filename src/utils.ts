@@ -1,5 +1,4 @@
-import { extname } from "path";
-import { Readable } from "stream";
+import { getExtension } from "./path-utils";
 
 export interface IStringKeyMap<T> {
   [key: string]: T;
@@ -21,20 +20,7 @@ export function isAnImage(ext: string) {
   return IMAGE_EXT_LIST.includes(ext.toLowerCase());
 }
 export function isAssetTypeAnImage(path: string): boolean {
-  return isAnImage(extname(path));
-}
-
-export async function streamToString(stream: Readable) {
-  const chunks: Uint8Array[] = [];
-
-  for await (const chunk of stream) {
-    const buf: Uint8Array = Buffer.isBuffer(chunk)
-      ? (chunk as Uint8Array)
-      : Buffer.from(typeof chunk === "string" ? chunk : String(chunk));
-    chunks.push(buf);
-  }
-
-  return Buffer.concat(chunks).toString("utf-8");
+  return isAnImage(getExtension(path));
 }
 
 export function getUrlAsset(url: string) {

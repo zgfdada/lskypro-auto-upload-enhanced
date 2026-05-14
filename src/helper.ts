@@ -1,5 +1,5 @@
 import { MarkdownView, App, Editor } from "obsidian";
-import { parse } from "path";
+import { getFileNameWithoutExtension } from "./path-utils";
 
 interface Image {
   path: string;
@@ -11,7 +11,7 @@ interface Image {
 // ![](https://dasdasda) internet image should not has ext
 //const REGEX_FILE = /\!\[(.*?)\]\((\S+\.\w+)\)|\!\[(.*?)\]\((https?:\/\/.*?)\)/g;
 const REGEX_FILE = /!\[(.*?)\]\((.*?)\)/g;
-const REGEX_WIKI_FILE = /\!\[\[(.*?)(\s\|.*?)?\]\]/g;
+const REGEX_WIKI_FILE = /!\[\[(.*?)(\s\|.*?)?\]\]/g;
 export default class Helper {
   app: App;
 
@@ -27,7 +27,7 @@ export default class Helper {
     const cache = this.app.metadataCache.getCache(path);
 
     let value = defaultValue;
-    if (cache?.frontmatter && cache.frontmatter.hasOwnProperty(key)) {
+    if (cache?.frontmatter && Object.prototype.hasOwnProperty.call(cache.frontmatter, key)) {
       value = cache.frontmatter[key];
     }
     return value;
@@ -93,7 +93,7 @@ export default class Helper {
     }
 
     for (const match of WikiMatches) {
-      const name = parse(match[1]).name;
+      const name = getFileNameWithoutExtension(match[1]);
       const path = match[1];
       const source = match[0];
       fileArray.push({

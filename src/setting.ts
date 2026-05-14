@@ -44,7 +44,7 @@ export class SettingTab extends PluginSettingTab {
   display(): void {
     const { containerEl } = this;
     containerEl.empty();
-    containerEl.createEl("h2", { text: t("Plugin Settings") });
+    new Setting(containerEl).setName(t("Plugin Settings")).setHeading();
 
     new Setting(containerEl)
       .setName(t("Auto pasted upload"))

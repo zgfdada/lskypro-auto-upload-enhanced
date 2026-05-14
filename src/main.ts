@@ -1,7 +1,6 @@
 import {
   addIcon,
   Editor,
-  FileSystemAdapter,
   MarkdownFileInfo,
   MarkdownView,
   Menu,
@@ -11,8 +10,6 @@ import {
   TAbstractFile,
   TFile,
 } from "obsidian";
-import * as path from "path";
-import imageType from "image-type";
 
 import { arrayToObject, getUrlAsset, isAssetTypeAnImage } from "./utils";
 import Helper from "./helper";
@@ -21,6 +18,14 @@ import { LskyProUploader } from "./uploader";
 import { resolveImageFileMetadata } from "./image-file";
 import { shouldDeleteUploadedSource } from "./upload-cleanup";
 import { getRemoteUploadCandidateKey } from "./upload-policy";
+import {
+  getBaseName,
+  getDirName,
+  getRelativeVaultPath,
+  joinVaultPath,
+  normalizeVaultPath,
+  parseVaultPath,
+} from "./path-utils";
 
 interface ImageLink {
   path: string;
@@ -87,7 +92,7 @@ export default class imageAutoUploadPlugin extends Plugin {
         }
         if (!checking) {
           const file = this.app.workspace.getActiveFile();
-          this.uploadAllFile(file || undefined);
+          void this.uploadAllFile(file || undefined);
         }
         return true;
       },
@@ -150,7 +155,7 @@ export default class imageAutoUploadPlugin extends Plugin {
   }
 
   normalizeVaultPath(vaultPath: string): string {
-    return (vaultPath || "").replace(/\\/g, "/").replace(/^\/+/, "").replace(/\/+$/, "");
+    return normalizeVaultPath(vaultPath);
   }
 
   getAttachmentFolderPathForFile(targetFile?: TFile | null): string | null {
@@ -167,10 +172,10 @@ export default class imageAutoUploadPlugin extends Plugin {
 
     const parentPath = this.normalizeVaultPath(targetFile.parent?.path || "");
     if (assetFolder.startsWith("./")) {
-      return this.normalizeVaultPath(path.posix.join(parentPath, assetFolder.substring(2)));
+      return this.normalizeVaultPath(joinVaultPath(parentPath, assetFolder.substring(2)));
     }
     if (assetFolder.startsWith("../")) {
-      return this.normalizeVaultPath(path.posix.join(parentPath, assetFolder));
+      return this.normalizeVaultPath(joinVaultPath(parentPath, assetFolder));
     }
     return this.normalizeVaultPath(assetFolder);
   }
@@ -193,9 +198,9 @@ export default class imageAutoUploadPlugin extends Plugin {
   toNoteRelativePath(noteFile: TFile, targetPath: string): string {
     const noteDir = this.normalizeVaultPath(noteFile.parent?.path || "");
     const normalizedTarget = this.normalizeVaultPath(targetPath);
-    let relativePath = path.posix.relative(noteDir || "", normalizedTarget);
+    let relativePath = getRelativeVaultPath(noteDir || "", normalizedTarget);
     if (!relativePath) {
-      relativePath = path.posix.basename(normalizedTarget);
+      relativePath = getBaseName(normalizedTarget);
     }
     if (!relativePath.startsWith(".") && !relativePath.startsWith("/")) {
       relativePath = `./${relativePath}`;
@@ -211,9 +216,10 @@ export default class imageAutoUploadPlugin extends Plugin {
     await this.ensureFolderExists(folderPathAbs);
 
     const asset = getUrlAsset(url);
+    const parsedAsset = parseVaultPath(asset);
     let [name, ext] = [
-      decodeURI(path.parse(asset).name).replaceAll(/[\\/:*?"<>|]/g, "-"),
-      path.parse(asset).ext,
+      decodeURI(parsedAsset.name).replaceAll(/[\\/:*?"<>|]/g, "-"),
+      parsedAsset.ext,
     ];
     const originalFileName = ext ? `${name}${ext}` : name;
     const candidatePath = this.normalizeVaultPath(folderPathAbs ? `${folderPathAbs}/${originalFileName}` : originalFileName);
@@ -248,7 +254,7 @@ export default class imageAutoUploadPlugin extends Plugin {
         }
         success++;
         const localPath = this.toNoteRelativePath(activeFile, response.path);
-        const fileName = path.posix.basename(response.path);
+        const fileName = getBaseName(response.path);
         updatedContent = updatedContent.replace(
           file.source,
           `![${fileName}${this.settings.imageSizeSuffix || ""}](${localPath})`,
@@ -269,8 +275,7 @@ export default class imageAutoUploadPlugin extends Plugin {
   async download(url: string, folderPath: string, name: string, ext: string): Promise<DownloadResult> {
     const response = await requestUrl({ url });
     const bytes = new Uint8Array(response.arrayBuffer);
-    const type = await imageType(bytes);
-    const resolvedMetadata = await resolveImageFileMetadata(`${name}${ext}`, bytes);
+    const resolvedMetadata = resolveImageFileMetadata(`${name}${ext}`, bytes);
 
     if (response.status !== 200 || !resolvedMetadata) {
       return {
@@ -279,11 +284,9 @@ export default class imageAutoUploadPlugin extends Plugin {
       };
     }
 
-    const buffer = Buffer.from(response.arrayBuffer);
-
     try {
       const targetPath = `${folderPath}/${resolvedMetadata.fileName}`;
-      await (this.app.vault as any).createBinary(targetPath, buffer, {
+      await this.app.vault.createBinary(targetPath, response.arrayBuffer, {
         ctime: Date.now(),
         mtime: Date.now(),
       });
@@ -291,7 +294,7 @@ export default class imageAutoUploadPlugin extends Plugin {
         ok: true,
         msg: "ok",
         path: targetPath,
-        type: type || { ext: resolvedMetadata.detectedExtension, mime: resolvedMetadata.mime },
+        type: { ext: resolvedMetadata.detectedExtension, mime: resolvedMetadata.mime },
       };
     } catch (err) {
       console.error(err);
@@ -314,11 +317,11 @@ export default class imageAutoUploadPlugin extends Plugin {
     const normalizedPath = this.normalizeVaultPath(decodedPath);
     let file = filePathMap[normalizedPath];
     if (!file && (decodedPath.startsWith("./") || decodedPath.startsWith("../"))) {
-      const absolutePath = this.normalizeVaultPath(path.posix.join(path.posix.dirname(activeFile.path), decodedPath));
+      const absolutePath = this.normalizeVaultPath(joinVaultPath(getDirName(activeFile.path), decodedPath));
       file = this.app.vault.getAbstractFileByPath(absolutePath) as TFile | null;
     }
     if (!file) {
-      file = this.getFile(path.basename(decodedPath), fileMap);
+      file = this.getFile(getBaseName(decodedPath), fileMap);
     }
     return file;
   }
@@ -341,23 +344,26 @@ export default class imageAutoUploadPlugin extends Plugin {
       lines.push(`错误: ${state.lastError}`);
     }
     const message = lines.join("\n");
-    const noticeWithSetMessage = notice as Notice & { setMessage?: (message: string) => void; noticeEl?: HTMLElement };
+    const noticeWithSetMessage = notice as Notice & {
+      setMessage?: (message: string) => void;
+      messageEl?: HTMLElement;
+    };
     if (typeof noticeWithSetMessage.setMessage === "function") {
       noticeWithSetMessage.setMessage(message);
       return;
     }
-    if (!noticeWithSetMessage.noticeEl) {
+    if (!noticeWithSetMessage.messageEl) {
       return;
     }
-    const contentEl = noticeWithSetMessage.noticeEl.querySelector(".notice-content") || noticeWithSetMessage.noticeEl;
+    const contentEl = noticeWithSetMessage.messageEl;
     while (contentEl.firstChild) {
       contentEl.removeChild(contentEl.firstChild);
     }
     message.split("\n").forEach((line, index) => {
       if (index > 0) {
-        contentEl.appendChild(document.createElement("br"));
+        contentEl.appendChild(activeDocument.createElement("br"));
       }
-      contentEl.appendChild(document.createTextNode(line));
+      contentEl.appendChild(activeDocument.createTextNode(line));
     });
   }
 
@@ -392,7 +398,6 @@ export default class imageAutoUploadPlugin extends Plugin {
       !!this.app.workspace.getActiveViewOfType(MarkdownView);
     let content = isActive ? this.helper.getValue() : await this.app.vault.read(activeFile);
 
-    const basePath = (this.app.vault.adapter as FileSystemAdapter).getBasePath();
     const fileMap = arrayToObject(this.app.vault.getFiles(), "name");
     const filePathMap = arrayToObject(this.app.vault.getFiles(), "path");
     const imageList: ImageLink[] = [];
@@ -413,9 +418,9 @@ export default class imageAutoUploadPlugin extends Plugin {
           const downloadResult = await this.downloadRemoteImageToVault(encodedUri, activeFile);
           if (downloadResult.ok && downloadResult.path) {
             const pushObj = {
-              path: path.join(basePath, downloadResult.path),
+              path: downloadResult.path,
               obspath: downloadResult.path,
-              name: path.posix.basename(downloadResult.path) || imageName,
+              name: getBaseName(downloadResult.path) || imageName,
               source: match.source,
               cleanupOnFailure: true,
             };
@@ -434,19 +439,18 @@ export default class imageAutoUploadPlugin extends Plugin {
         continue;
       }
 
-      const abstractImageFile = path.join(basePath, file.path);
-      if (!isAssetTypeAnImage(abstractImageFile)) {
+      if (!isAssetTypeAnImage(file.path)) {
         continue;
       }
 
       const pushObj = {
-        path: abstractImageFile,
+        path: file.path,
         obspath: file.path,
         name: file.name || imageName,
         source: match.source,
         cleanupOnFailure: false,
       };
-      if (!imageList.find((item) => item.path === abstractImageFile && item.source === match.source)) {
+      if (!imageList.find((item) => item.path === file.path && item.source === match.source)) {
         imageList.push(pushObj);
       }
     }
@@ -559,7 +563,7 @@ export default class imageAutoUploadPlugin extends Plugin {
       for (const obsPath of filesToDelete) {
         const fileDel = this.app.vault.getAbstractFileByPath(obsPath);
         if (fileDel) {
-          await this.app.vault.delete(fileDel);
+          await this.app.fileManager.trashFile(fileDel);
         }
       }
     }
@@ -622,6 +626,9 @@ export default class imageAutoUploadPlugin extends Plugin {
   setupPasteHandler() {
     this.registerEvent(
       this.app.workspace.on("editor-paste", (evt: ClipboardEvent, editor: Editor) => {
+        if (evt.defaultPrevented) {
+          return;
+        }
         const allowUpload = this.helper.getFrontmatterValue(
           "image-auto-upload",
           this.settings.uploadByClipSwitch,
@@ -690,6 +697,9 @@ export default class imageAutoUploadPlugin extends Plugin {
 
     this.registerEvent(
       this.app.workspace.on("editor-drop", async (evt: DragEvent, editor: Editor) => {
+        if (evt.defaultPrevented) {
+          return;
+        }
         const allowUpload = this.helper.getFrontmatterValue(
           "image-auto-upload",
           this.settings.uploadByClipSwitch,
@@ -767,7 +777,6 @@ export default class imageAutoUploadPlugin extends Plugin {
 
   handleFailedUpload(editor: Editor, pasteId: string, reason: any) {
     new Notice(String(reason));
-    console.error("Failed request: ", reason);
     const progressText = imageAutoUploadPlugin.progressTextFor(pasteId);
     imageAutoUploadPlugin.replaceFirstOccurrence(editor, progressText, "upload failed, check dev console");
   }
