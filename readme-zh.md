@@ -1,45 +1,103 @@
 # Obsidian LskyPro Auto Upload Plugin
 
-这是一个支持直接上传图片到图床[Lsky](https://github.com/lsky-org/lsky-pro)的工具，基于[renmu123/obsidian-image-auto-upload-plugin](https://github.com/renmu123/obsidian-image-auto-upload-plugin.git)改造。
-**更新插件后记得重启一下 Obsidian**
+这是一个把图片上传到 [Lsky Pro](https://github.com/lsky-org/lsky-pro) 的 Obsidian 插件。本 fork 在原项目基础上保留了剪贴板上传和拖拽上传，同时把“本地图片 + 远程图片 + 兰空兼容性”这一条链路整理成了更可维护的实现。
 
-## 本次提交更新内容
+## 这个 Fork 新增了什么
 
-- 新增命令：`Upload all images - All notes in vault (reuse)`。
-  - 扫描库中所有 Markdown 笔记，上传本地图片并将引用统一替换为外链。
-  - 复用已有方法 `uploadAllFile(currentFile?: TFile)` 逐个处理文件，避免重复逻辑。
-- 重构 `uploadAllFile`：支持传入 `TFile` 参数并顺序执行（`await`）。
-  - 当处理当前激活文件时，使用编辑器内容并通过编辑器更新。
-  - 当处理非激活文件时，从 vault 读取内容，处理后直接写回文件。
-- 更新原有“上传当前文件所有图片”的命令，使其向改造后的方法传入当前激活文件。
+- 兼容旧版 Lsky Pro：
+  - `POST /api/upload`
+  - `token: <token>` 请求头
+  - `image` 表单字段
+- 兼容新版 Lsky Pro：
+  - `POST /api/v1/upload`
+  - `Authorization: Bearer <token>`
+  - `file` 表单字段
+- 新增“图片下载目录”配置
+  - 留空时跟随 Obsidian 附件目录
+- `Download all images` 现在会把远程图片下载到本地后，替换成对当前笔记可用的相对链接
+- 新增右键菜单：
+  - `上传当前文件图片到兰空（自动处理远程图）`
+- 上传当前笔记图片时：
+  - 遇到远程图片会先下载到本地
+  - 再上传到兰空
+  - 最后把笔记中的链接替换成兰空链接
+- 当前笔记上传时新增单个持续更新的浮动通知
+  - 显示总数、当前进度、成功数、失败数、当前图片名、最后一条错误
 
-### 新命令使用方式
+## 安装
 
-1. 打开命令面板（`Ctrl+P`）。
-2. 输入并执行：`Upload all images - All notes in vault (reuse)`。
-3. 插件会遍历所有 `.md` 文件，上传本地图片并替换引用，完成后会弹出统计提示。
+### 从源码构建
 
-说明：
-- 本地图片会被上传；网络图片的处理遵循现有设置（`workOnNetWork` 与黑名单域名过滤）。
-- 相对路径与绝对路径的解析与当前文件命令保持一致。
+```bash
+npm install
+npm run build
+```
 
-# 开始
+把生成的插件文件放到：
 
-1. 安装 LskyPro 图床，并进行配置，配置参考[官网](https://www.lsky.pro/)
-2. 开启 LskyPro 的接口
-3. 使用授权接口获取Token，并记录下来
-4. 打开插件配置项，设置LskyPro域名(例如：https://lsky.xxx.com)
-5. 设置LskyPro Token
-6. 存储策略ID是可选配置，根据 LskyPro 的策略和自己的要求来配置，如果只有一个策略，可以不设置
+```text
+<你的 vault>/.obsidian/plugins/lskypro-auto-upload
+```
 
-# 特性
+然后重载或重启 Obsidian。
 
-## 剪切板上传
+## 配置
 
-支持黏贴剪切板的图片的时候直接上传，目前支持复制系统内图像直接上传。
-支持通过设置 `frontmatter` 来控制单个文件的上传，默认值为 `true`，控制关闭请将该值设置为 `false`
+打开：
 
-支持 ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".svg", ".tiff"（因为是直接调用LskyPro接口，理论上图床支持的文件都可以）
+```text
+设置 -> 第三方插件 -> Image To Lskypro
+```
+
+重点配置项：
+
+- `LskyPro 域名`
+  - 只填站点根地址
+  - 例如：`https://lsky.example.com`
+- `LskyPro Token`
+  - 新版 Lsky Pro：填写 API Token
+  - 旧版 Lsky Pro：填写用户设置页里显示的 32 位 token
+- `图片下载目录`
+  - 留空时跟随 Obsidian 附件目录
+  - 也可以单独指定，例如 `attachments/clippings`
+- `Delete source file after you upload file`
+  - 上传成功后删除本地源文件
+
+## 命令
+
+### Upload all images-All images in the current file
+
+上传当前笔记中引用的图片。
+
+- 本地图片直接上传
+- 远程图片先下载再上传
+- 笔记中的图片链接会被替换成兰空链接
+- 处理过程中会显示浮动进度通知
+
+### Download all images
+
+把当前笔记中的远程图片下载到配置的目录，并替换成当前笔记可用的本地相对链接。
+
+### Upload all images - All notes in vault (reuse)
+
+把“当前笔记上传”这套逻辑复用到整个 vault 的所有 Markdown 笔记。
+
+## 右键菜单
+
+本 fork 为 Markdown 笔记新增了右键菜单：
+
+```text
+上传当前文件图片到兰空（自动处理远程图）
+```
+
+会出现在：
+
+- 文件树中 `.md` 文件的右键菜单
+- 编辑器中的当前 Markdown 笔记右键菜单
+
+## Frontmatter
+
+可以用 frontmatter 控制单篇笔记是否启用剪贴板自动上传：
 
 ```yaml
 ---
@@ -47,37 +105,23 @@ image-auto-upload: true
 ---
 ```
 
-## 批量上传一个文件中的所有图像文件
+设为 `false` 时，这篇笔记不会自动上传剪贴板图片。
 
-输入 `ctrl+P` 呼出面板，输入 `upload all images`(Upload all images-All images in the current file)，点击回车，就会自动开始上传。
+## 支持的输入方式
 
-现在也可以一次性处理所有笔记：
+- 剪贴板图片粘贴
+- 拖拽图片文件
+- 命令上传当前笔记中的本地图片
+- 命令下载当前笔记中的远程图片
+- 右键上传当前笔记中的图片
 
-- 打开命令面板并执行：`Upload all images - All notes in vault (reuse)`
-- 插件会复用同样的逻辑逐个处理并替换链接。
+## 说明
 
-路径解析优先级，会依次按照优先级查找：
+- 修改插件代码后，需要重载或重启 Obsidian。
+- 如果旧版 Lsky Pro 返回“管理员关闭了接口”，请到兰空后台开启 API。
+- 如果远程图片站点有防盗链、Cookie 验证或其他限制，下载仍然可能失败。
 
-1. 绝对路径，指基于库的绝对路径
-2. 相对路径，以./或../开头
-3. 尽可能简短的形式
+## 致谢
 
-## 批量下载网络图片到本地
-
-输入 `ctrl+P` 呼出面板，输入 `download all images`，点击回车，就会自动开始下载。只在 win 进行过测试
-
-## 支持右键菜单上传图片
-
-目前已支持标准 md 以及 wiki 格式。支持相对路径以及绝对路径，需要进行正确设置，不然会引发奇怪的问题
-
-## 支持拖拽上传
-
-允许多文件拖拽
-
-
-
-# TODO
-
-# 感谢
-
-[renmu123/obsidian-image-auto-upload-plugin](https://github.com/renmu123/obsidian-image-auto-upload-plugin.git)
+- 上游项目：[NekoTarou/lskypro-auto-upload](https://github.com/NekoTarou/lskypro-auto-upload)
+- 参考项目：[renmu123/obsidian-image-auto-upload-plugin](https://github.com/renmu123/obsidian-image-auto-upload-plugin.git)

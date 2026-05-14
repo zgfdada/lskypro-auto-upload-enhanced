@@ -1,45 +1,103 @@
 # Obsidian LskyPro Auto Upload Plugin
 
-This is a tool that supports uploading images directly to the image bed [Lsky](https://github.com/lsky-org/lsky-pro), based on [renmu123/obsidian-image-auto-upload-plugin](https://github.com/renmu123/obsidian-image-auto-upload-plugin.git) modification.
-**Remember to restart Obsidian after updating the plugin**
+An Obsidian plugin for uploading images to [Lsky Pro](https://github.com/lsky-org/lsky-pro). This fork keeps the original clipboard and drag/drop workflow, and adds a more maintainable implementation for mixed local/remote image handling.
 
-## What's New (this commit)
+## What This Fork Adds
 
-- Added a new command: `Upload all images - All notes in vault (reuse)`.
-  - Scans all Markdown notes in your vault and uploads local images, then replaces links with uploaded URLs.
-  - Reuses the existing `uploadAllFile(currentFile?: TFile)` method for each note to avoid duplicated logic.
-- Refactored `uploadAllFile` to accept a `TFile` parameter and run sequentially (`await`).
-  - When called for the active note, it uses the editor content and updates via the editor.
-  - When called for non-active notes, it reads the file from the vault and writes back with updated links.
-- Updated the existing "Upload all images" command to pass the active file to the refactored method.
+- Compatibility with older Lsky Pro deployments that use:
+  - `POST /api/upload`
+  - `token: <token>` header
+  - `image` form field
+- Compatibility with newer Lsky Pro deployments that use:
+  - `POST /api/v1/upload`
+  - `Authorization: Bearer <token>`
+  - `file` form field
+- Configurable download folder for remote images
+  - Leave it empty to follow Obsidian's attachment folder setting
+- `Download all images` now replaces remote links with note-relative local links
+- File and editor context-menu action:
+  - `上传当前文件图片到兰空（自动处理远程图）`
+- When uploading the current note:
+  - remote images are downloaded first
+  - then uploaded to Lsky
+  - then links in the note are replaced with Lsky URLs
+- Single floating progress notice during current-note upload
+  - shows total, current progress, success count, failure count, current file, and last error
 
-### How to use the new command
+## Install
 
-1. Open the command palette (`Ctrl+P`).
-2. Run `Upload all images - All notes in vault (reuse)`.
-3. The plugin will iterate all `.md` files, upload local images, and replace references; a summary notice appears when done.
+### From source
 
-Notes:
-- Local images are uploaded; handling of network images respects your current settings (`workOnNetWork` and black domain filters).
-- Relative and absolute paths are resolved consistently, same as the current-file command.
+```bash
+npm install
+npm run build
+```
 
-# Start
+Copy the generated plugin files into:
 
-1. Install the LskyPro image bed and configure it. For configuration, refer to [official website](https://www.lsky.pro/)
-2. Open the interface of LskyPro
-3. Use the authorization interface to obtain Token and record it
-4. Open the plug-in configuration item and set the LskyPro domain name (for example: https://lsky.xxx.com)
-5. Set LskyPro Token
-6. The storage policy ID is an optional configuration, and it is configured according to LskyPro's policy and its own requirements. If there is only one policy, it does not need to be set
+```text
+<your-vault>/.obsidian/plugins/lskypro-auto-upload
+```
 
-# Features
+Then reload Obsidian.
 
-## Upload when paste image
+## Configuration
 
-It supports uploading directly when pasting pictures from the clipboard, and currently supports copying images in the system and uploading them directly.
-Support to control the upload of a single file by setting `frontmatter`, the default value is `true`, please set the value to `false` to control the shutdown
+Open:
 
-Support ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".svg", ".tiff" (because it directly calls the LskyPro interface, theoretically the files supported by the image bed It will be all right)
+```text
+Settings -> Community plugins -> Image To Lskypro
+```
+
+Important settings:
+
+- `LskyPro 域名`
+  - only fill the site base URL
+  - example: `https://lsky.example.com`
+- `LskyPro Token`
+  - for new Lsky Pro: fill API token
+  - for old Lsky Pro: fill the 32-character token from the user settings page
+- `图片下载目录`
+  - leave empty to follow Obsidian attachment folder
+  - or set a dedicated folder such as `attachments/clippings`
+- `Delete source file after you upload file`
+  - deletes local source files after upload succeeds
+
+## Commands
+
+### Upload all images-All images in the current file
+
+Uploads images referenced in the current note.
+
+- Local images are uploaded directly
+- Remote images are downloaded first, then uploaded
+- Links are replaced with Lsky URLs
+- A floating progress notice is shown during processing
+
+### Download all images
+
+Downloads remote images referenced in the current note into the configured download folder, then replaces the note links with local relative links.
+
+### Upload all images - All notes in vault (reuse)
+
+Runs the current-note upload logic across all Markdown notes in the vault.
+
+## Context Menu
+
+This fork adds a context-menu entry for Markdown notes:
+
+```text
+上传当前文件图片到兰空（自动处理远程图）
+```
+
+It appears in:
+
+- file explorer context menu for `.md` files
+- editor context menu for the current Markdown note
+
+## Frontmatter
+
+You can control clipboard auto upload per note:
 
 ```yaml
 ---
@@ -47,31 +105,23 @@ image-auto-upload: true
 ---
 ```
 
-## Upload all local images file by command
+Set it to `false` to disable auto upload for that note.
 
-press ctrl+P and input upload all images(Upload all images-All images in the current file)，enter, then will auto upload all local images
+## Supported Input
 
-You can also process all notes at once with the new command:
+- Clipboard image paste
+- Drag and drop image files
+- Upload local note images by command
+- Download remote note images by command
+- Upload current note images from the context menu
 
-- Open the command palette and run: `Upload all images - All notes in vault (reuse)`
-- It will reuse the same logic per note and update links across the vault.
+## Notes
 
-The path resolution priority will be searched according to the priority in turn:
+- After changing plugin code, reload or restart Obsidian.
+- If your old Lsky Pro instance returns `管理员关闭了接口`, enable API access in the Lsky Pro admin panel.
+- If remote images are protected by cookies or anti-hotlink rules, download may still fail depending on the source site.
 
-1. Absolute path, refers to the absolute path based on the library
-2. Relative paths, starting with ./ or ../
-3. shortest possible form
+## Credits
 
-## download all internet to local
-
-press ctrl+P and input upload all images，enter, then will auto upload all local images
-
-## Support drag-and-drop
-
-Allow multiple file drag and drop
-
-
-# TODO
-
-# Thanks
-[renmu123/obsidian-image-auto-upload-plugin](https://github.com/renmu123/obsidian-image-auto-upload-plugin.git)
+- Original project: [NekoTarou/lskypro-auto-upload](https://github.com/NekoTarou/lskypro-auto-upload)
+- Based on: [renmu123/obsidian-image-auto-upload-plugin](https://github.com/renmu123/obsidian-image-auto-upload-plugin.git)

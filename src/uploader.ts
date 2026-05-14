@@ -1,135 +1,184 @@
+import { App } from "obsidian";
 import { PluginSettings } from "./setting";
-import { App, TFile } from "obsidian";
-//兰空上传器
+
+export interface UploadResult {
+  code: number;
+  msg: string;
+  data: string;
+  fullResult: any[];
+}
+
+export interface UploadBatchResult {
+  result: string[];
+  success: boolean;
+  fullResult?: any[];
+  message?: string;
+}
+
 export class LskyProUploader {
   settings: PluginSettings;
   lskyUrl: string;
   lskyToken: string;
   app: App;
+  isLegacyApi: boolean;
 
-  constructor(settings: PluginSettings,app: App) {
+  constructor(settings: PluginSettings, app: App) {
     this.settings = settings;
+    this.isLegacyApi = /^[0-9a-f]{32}$/i.test((this.settings.token || "").trim());
     this.lskyUrl = this.settings.uploadServer.endsWith("/")
-      ? this.settings.uploadServer + "api/v1/upload"
-      : this.settings.uploadServer + "/api/v1/upload";
-    this.lskyToken = "Bearer " + this.settings.token;
+      ? this.settings.uploadServer + (this.isLegacyApi ? "api/upload" : "api/v1/upload")
+      : this.settings.uploadServer + (this.isLegacyApi ? "/api/upload" : "/api/v1/upload");
+    this.lskyToken = this.isLegacyApi
+      ? (this.settings.token || "").trim()
+      : "Bearer " + this.settings.token;
     this.app = app;
   }
 
-  //上传请求配置
   getRequestOptions(file: File) {
-    let headers = new Headers();
-    headers.append("Authorization", this.lskyToken);
+    const headers = new Headers();
     headers.append("Accept", "application/json");
 
-    let formdata = new FormData();
-    formdata.append("file", file);
-    if (this.settings.strategy_id) {
-      formdata.append("strategy_id", this.settings.strategy_id);
+    const formdata = new FormData();
+    if (this.isLegacyApi) {
+      headers.append("token", this.lskyToken);
+      formdata.append("image", file);
+    } else {
+      headers.append("Authorization", this.lskyToken);
+      formdata.append("file", file);
+      if (this.settings.strategy_id) {
+        formdata.append("strategy_id", this.settings.strategy_id);
+      }
     }
 
     return {
       method: "POST",
-      headers: headers,
+      headers,
       body: formdata,
     };
   }
-  //上传文件，返回promise对象
-  promiseRequest(file: File) {
-    let requestOptions = this.getRequestOptions(file);
-    return new Promise(resolve => {
-      fetch(this.lskyUrl, requestOptions).then(response => {
-        response.json().then(value => {
-          if (!value.status) {
-            return resolve({
-              code: -1,
-              msg: value.message,
-              data: value.data,
-            });
-          } else {
-            return resolve({
-              code: 0,
-              msg: "success",
-              data: value.data?.links?.url,
-              fullResult: [],
-            });
-          }
-        });
-      });
-    }).catch(error => {
+
+  normalizeResponse(value: any): UploadResult {
+    if (this.isLegacyApi) {
+      if (Number(value?.code) !== 200) {
+        return {
+          code: -1,
+          msg: value?.msg || "Upload error",
+          data: "",
+          fullResult: [],
+        };
+      }
+
+      return {
+        code: 0,
+        msg: "success",
+        data: value?.data?.url || "",
+        fullResult: [value?.data].filter(Boolean),
+      };
+    }
+
+    if (!value?.status) {
+      return {
+        code: -1,
+        msg: value?.message || "Upload error",
+        data: "",
+        fullResult: [],
+      };
+    }
+
+    return {
+      code: 0,
+      msg: "success",
+      data: value?.data?.links?.url || "",
+      fullResult: [value?.data].filter(Boolean),
+    };
+  }
+
+  async promiseRequest(file: File): Promise<UploadResult> {
+    try {
+      const response = await fetch(this.lskyUrl, this.getRequestOptions(file));
+      const value = await response.json();
+      return this.normalizeResponse(value);
+    } catch (error: any) {
       console.log("error", error);
       return {
         code: -1,
-        msg: error,
+        msg: error?.message || String(error),
         data: "",
+        fullResult: [],
       };
-    });
-  }
-  //通过路径创建文件
-  async createFileObjectFromPath(path: string): Promise<File> {
-    return new Promise<File>(resolve => {
-      if(path.startsWith('https://') || path.startsWith('http://')){
-        return fetch(path).then(response => {
-          return response.blob().then(blob => {
-            resolve(new File([blob], path.split("/").pop()));
-          });
-        });
-      }
-      let obsfile = this.app.vault.getAbstractFileByPath(path);
-      //@ts-ignore
-      this.app.vault.readBinary(obsfile).then(data=>{
-        const fileName = path.split("/").pop(); // 获取文件名
-        const fileExtension = fileName.split(".").pop(); // 获取后缀名
-        const blob = new Blob([data], { type: "image/" + fileExtension });
-        const file = new File([blob], fileName);
-        resolve(file);
-      }).catch(err=>{
-        console.error("Error reading file:", err);
-        return;
-      });
-    });
+    }
   }
 
-  async uploadFilesByPath(fileList: string[]): Promise<any> {
-    let promiseArr = fileList.map(async (filepath: string) => {
-      let file = await this.createFileObjectFromPath(filepath);
-      return this.promiseRequest(file);
-    });
-    try {
-      let reurnObj = await Promise.all(promiseArr);
+  async createFileObjectFromPath(filePath: string): Promise<File> {
+    if (filePath.startsWith("https://") || filePath.startsWith("http://")) {
+      const response = await fetch(filePath);
+      const blob = await response.blob();
+      return new File([blob], filePath.split("/").pop() || "image");
+    }
+
+    const obsFile = this.app.vault.getAbstractFileByPath(filePath);
+    // @ts-ignore
+    const data = await this.app.vault.readBinary(obsFile);
+    const fileName = filePath.split("/").pop() || "image";
+    const fileExtension = fileName.split(".").pop() || "png";
+    const blob = new Blob([data], { type: "image/" + fileExtension });
+    return new File([blob], fileName);
+  }
+
+  async uploadFilePath(filePath: string): Promise<UploadResult> {
+    const file = await this.createFileObjectFromPath(filePath);
+    return this.promiseRequest(file);
+  }
+
+  async uploadFilesByPath(fileList: string[]): Promise<UploadBatchResult> {
+    const results = await Promise.all(fileList.map((filepath) => this.uploadFilePath(filepath)));
+    const failItem = results.find((item) => item.code === -1);
+    if (failItem) {
       return {
-        result: reurnObj.map((item: { data: string }) => item.data),
-        success: true,
-      };
-    } catch (error) {
-      return {
+        result: results.filter((item) => item.code === 0).map((item) => item.data),
         success: false,
+        fullResult: results.flatMap((item) => item.fullResult || []),
+        message: failItem.msg,
       };
     }
+
+    return {
+      result: results.map((item) => item.data),
+      success: true,
+      fullResult: results.flatMap((item) => item.fullResult || []),
+    };
   }
-  async uploadFiles(fileList: Array<File>): Promise<any> {
-    let promiseArr = fileList.map(async file => {
-      return this.promiseRequest(file);
-    });
-    try {
-      let reurnObj = await Promise.all(promiseArr);
-      let failItem:any = reurnObj.find((item: { code: number })=>item.code===-1);
-      if (failItem) {
-        throw {err:failItem.msg}
-      }
+
+  async uploadFiles(fileList: Array<File>): Promise<UploadBatchResult> {
+    const results = await Promise.all(fileList.map((file) => this.promiseRequest(file)));
+    const failItem = results.find((item) => item.code === -1);
+    if (failItem) {
       return {
-        result: reurnObj.map((item: { data: string }) => item.data),
-        success: true,
-      };
-    } catch (error) {
-      return {
+        result: results.filter((item) => item.code === 0).map((item) => item.data),
         success: false,
+        fullResult: results.flatMap((item) => item.fullResult || []),
+        message: failItem.msg,
       };
     }
+
+    return {
+      result: results.map((item) => item.data),
+      success: true,
+      fullResult: results.flatMap((item) => item.fullResult || []),
+    };
   }
-  async uploadFileByClipboard(evt: ClipboardEvent): Promise<any> {
-    let files = evt.clipboardData.files;
-    let file = files[0];
+
+  async uploadFileByClipboard(evt: ClipboardEvent): Promise<UploadResult> {
+    const files = evt.clipboardData?.files;
+    const file = files?.[0];
+    if (!file) {
+      return {
+        code: -1,
+        msg: "No clipboard image",
+        data: "",
+        fullResult: [],
+      };
+    }
     return this.promiseRequest(file);
   }
 }
