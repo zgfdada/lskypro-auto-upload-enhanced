@@ -1,9 +1,9 @@
 {
   "id": "lskypro-auto-upload-enhanced",
   "name": "Image To Lskypro Enhanced",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "minAppVersion": "1.2.8",
-  "description": "Upload local and remote note images to Lsky Pro with download, context-menu, and progress support",
+  "description": "Upload local and remote note images to Lsky Pro with download, context-menu, and progress support.",
   "author": "zgfdada",
   "authorUrl": "https://github.com/zgfdada",
   "isDesktopOnly": false
