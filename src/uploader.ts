@@ -1,5 +1,7 @@
 import { App } from "obsidian";
 import { PluginSettings } from "./setting";
+import { resolveImageFileMetadata } from "./image-file";
+import { getUploadConversionPlan } from "./upload-policy";
 
 export interface UploadResult {
   code: number;
@@ -97,7 +99,11 @@ export class LskyProUploader {
     try {
       const response = await fetch(this.lskyUrl, this.getRequestOptions(file));
       const value = await response.json();
-      return this.normalizeResponse(value);
+      const normalized = this.normalizeResponse(value);
+      if (normalized.code !== 0) {
+        normalized.msg = `${normalized.msg} [file=${file.name}, type=${file.type || "unknown"}, size=${file.size}]`;
+      }
+      return normalized;
     } catch (error: any) {
       console.log("error", error);
       return {
@@ -109,20 +115,84 @@ export class LskyProUploader {
     }
   }
 
+  async createNormalizedFile(bytes: Uint8Array, originalName: string): Promise<File> {
+    const metadata = await resolveImageFileMetadata(originalName, bytes);
+    if (!metadata) {
+      const fileHeader = Array.from(bytes.subarray(0, 16))
+        .map((item) => item.toString(16).padStart(2, "0"))
+        .join(" ");
+      throw new Error(`Illegal image data: ${originalName} [header=${fileHeader}]`);
+    }
+    const plan = getUploadConversionPlan({
+      isLegacyApi: this.isLegacyApi,
+      detectedExtension: metadata.detectedExtension,
+      mime: metadata.mime,
+    });
+
+    if (!plan.convert) {
+      const fileBytes = bytes.slice().buffer as ArrayBuffer;
+      return new File([fileBytes], metadata.fileName, { type: metadata.mime });
+    }
+
+    const convertedBytes = await this.convertImageBytes(bytes, metadata.mime, plan.targetMime);
+    const convertedFileName = metadata.fileName.replace(/\.[^.]+$/, `.${plan.targetExtension}`);
+    return new File([convertedBytes.buffer as ArrayBuffer], convertedFileName, { type: plan.targetMime });
+  }
+
+  async convertImageBytes(bytes: Uint8Array, inputMime: string, targetMime: string): Promise<Uint8Array> {
+    const blob = new Blob([bytes.slice().buffer as ArrayBuffer], { type: inputMime });
+    const objectUrl = URL.createObjectURL(blob);
+
+    try {
+      const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = () => reject(new Error(`Unsupported image conversion: ${inputMime}`));
+        img.src = objectUrl;
+      });
+
+      const canvas = document.createElement("canvas");
+      canvas.width = image.naturalWidth || image.width;
+      canvas.height = image.naturalHeight || image.height;
+      const context = canvas.getContext("2d");
+      if (!context) {
+        throw new Error("Canvas context unavailable");
+      }
+      context.drawImage(image, 0, 0);
+      const convertedBlob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob((value) => {
+          if (value) {
+            resolve(value);
+            return;
+          }
+          reject(new Error(`Failed to convert image to ${targetMime}`));
+        }, targetMime);
+      });
+      return new Uint8Array(await convertedBlob.arrayBuffer());
+    } finally {
+      URL.revokeObjectURL(objectUrl);
+    }
+  }
+
   async createFileObjectFromPath(filePath: string): Promise<File> {
     if (filePath.startsWith("https://") || filePath.startsWith("http://")) {
       const response = await fetch(filePath);
-      const blob = await response.blob();
-      return new File([blob], filePath.split("/").pop() || "image");
+      if (!response.ok) {
+        throw new Error(`Failed to download remote image: ${response.status} ${response.statusText}`);
+      }
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      const originalName = decodeURI(filePath.split("/").pop()?.split("?")[0].split("#")[0] || "image");
+      return this.createNormalizedFile(bytes, originalName);
     }
 
     const obsFile = this.app.vault.getAbstractFileByPath(filePath);
+    if (!obsFile) {
+      throw new Error(`Local image not found: ${filePath}`);
+    }
     // @ts-ignore
     const data = await this.app.vault.readBinary(obsFile);
     const fileName = filePath.split("/").pop() || "image";
-    const fileExtension = fileName.split(".").pop() || "png";
-    const blob = new Blob([data], { type: "image/" + fileExtension });
-    return new File([blob], fileName);
+    return this.createNormalizedFile(new Uint8Array(data), fileName);
   }
 
   async uploadFilePath(filePath: string): Promise<UploadResult> {

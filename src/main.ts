@@ -18,12 +18,16 @@ import { arrayToObject, getUrlAsset, isAssetTypeAnImage } from "./utils";
 import Helper from "./helper";
 import { SettingTab, PluginSettings, DEFAULT_SETTINGS } from "./setting";
 import { LskyProUploader } from "./uploader";
+import { resolveImageFileMetadata } from "./image-file";
+import { shouldDeleteUploadedSource } from "./upload-cleanup";
+import { getRemoteUploadCandidateKey } from "./upload-policy";
 
 interface ImageLink {
   path: string;
   obspath: string;
   name: string;
   source: string;
+  cleanupOnFailure?: boolean;
 }
 
 interface DownloadResult {
@@ -264,22 +268,21 @@ export default class imageAutoUploadPlugin extends Plugin {
 
   async download(url: string, folderPath: string, name: string, ext: string): Promise<DownloadResult> {
     const response = await requestUrl({ url });
-    const type = await imageType(new Uint8Array(response.arrayBuffer));
+    const bytes = new Uint8Array(response.arrayBuffer);
+    const type = await imageType(bytes);
+    const resolvedMetadata = await resolveImageFileMetadata(`${name}${ext}`, bytes);
 
-    if (response.status !== 200 || !type) {
+    if (response.status !== 200 || !resolvedMetadata) {
       return {
         ok: false,
-        msg: "error",
+        msg: `Illegal image data from remote source: ${url}`,
       };
     }
 
     const buffer = Buffer.from(response.arrayBuffer);
 
     try {
-      let targetPath = `${folderPath}/${name}${ext}`;
-      if (!ext) {
-        targetPath = `${folderPath}/${name}.${type.ext}`;
-      }
+      const targetPath = `${folderPath}/${resolvedMetadata.fileName}`;
       await (this.app.vault as any).createBinary(targetPath, buffer, {
         ctime: Date.now(),
         mtime: Date.now(),
@@ -288,7 +291,7 @@ export default class imageAutoUploadPlugin extends Plugin {
         ok: true,
         msg: "ok",
         path: targetPath,
-        type,
+        type: type || { ext: resolvedMetadata.detectedExtension, mime: resolvedMetadata.mime },
       };
     } catch (err) {
       console.error(err);
@@ -394,21 +397,31 @@ export default class imageAutoUploadPlugin extends Plugin {
     const filePathMap = arrayToObject(this.app.vault.getFiles(), "path");
     const imageList: ImageLink[] = [];
     const fileArray = this.helper.getImageLink(content);
+    const queuedRemoteImages = new Set<string>();
 
     for (const match of fileArray) {
       const imageName = match.name;
       const encodedUri = match.path;
 
       if (encodedUri.startsWith("http")) {
+        const remoteCandidateKey = getRemoteUploadCandidateKey(encodedUri, this.settings.uploadServer);
+        if (!remoteCandidateKey || queuedRemoteImages.has(remoteCandidateKey)) {
+          continue;
+        }
+        queuedRemoteImages.add(remoteCandidateKey);
         try {
           const downloadResult = await this.downloadRemoteImageToVault(encodedUri, activeFile);
           if (downloadResult.ok && downloadResult.path) {
-            imageList.push({
+            const pushObj = {
               path: path.join(basePath, downloadResult.path),
               obspath: downloadResult.path,
               name: path.posix.basename(downloadResult.path) || imageName,
               source: match.source,
-            });
+              cleanupOnFailure: true,
+            };
+            if (!imageList.find((item) => item.path === pushObj.path && item.source === pushObj.source)) {
+              imageList.push(pushObj);
+            }
           }
         } catch {
           // keep going; detailed failures surface during progress upload
@@ -431,6 +444,7 @@ export default class imageAutoUploadPlugin extends Plugin {
         obspath: file.path,
         name: file.name || imageName,
         source: match.source,
+        cleanupOnFailure: false,
       };
       if (!imageList.find((item) => item.path === abstractImageFile && item.source === match.source)) {
         imageList.push(pushObj);
@@ -476,12 +490,27 @@ export default class imageAutoUploadPlugin extends Plugin {
             item.source,
             `![${item.name}${this.settings.imageSizeSuffix || ""}](${singleResult.url})`,
           );
-          if (this.settings.deleteSource) {
+          if (
+            shouldDeleteUploadedSource({
+              uploadSucceeded: true,
+              deleteSource: this.settings.deleteSource,
+              cleanupOnFailure: !!item.cleanupOnFailure,
+            })
+          ) {
             filesToDelete.add(item.obspath);
           }
         } else {
           failCount++;
           lastError = `${item.name}: ${singleResult.message}`;
+          if (
+            shouldDeleteUploadedSource({
+              uploadSucceeded: false,
+              deleteSource: this.settings.deleteSource,
+              cleanupOnFailure: !!item.cleanupOnFailure,
+            })
+          ) {
+            filesToDelete.add(item.obspath);
+          }
           this.updateProgressNotice(notice, "开始上传图片到兰空", {
             total: imageList.length,
             current: index + 1,
@@ -494,6 +523,15 @@ export default class imageAutoUploadPlugin extends Plugin {
       } catch (error: any) {
         failCount++;
         lastError = `${item.name}: ${error?.message || String(error)}`;
+        if (
+          shouldDeleteUploadedSource({
+            uploadSucceeded: false,
+            deleteSource: this.settings.deleteSource,
+            cleanupOnFailure: !!item.cleanupOnFailure,
+          })
+        ) {
+          filesToDelete.add(item.obspath);
+        }
         this.updateProgressNotice(notice, "开始上传图片到兰空", {
           total: imageList.length,
           current: index + 1,
@@ -517,7 +555,7 @@ export default class imageAutoUploadPlugin extends Plugin {
       await this.app.vault.modify(activeFile, content);
     }
 
-    if (this.settings.deleteSource) {
+    if (filesToDelete.size > 0) {
       for (const obsPath of filesToDelete) {
         const fileDel = this.app.vault.getAbstractFileByPath(obsPath);
         if (fileDel) {

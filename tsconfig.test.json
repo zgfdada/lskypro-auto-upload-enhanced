@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "dist-tests",
+    "rootDir": ".",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "inlineSourceMap": false,
+    "inlineSources": false
+  },
+  "include": ["src/image-file.ts", "src/upload-cleanup.ts", "src/upload-policy.ts", "tests/**/*.ts"]
+}

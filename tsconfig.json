@@ -13,5 +13,5 @@
     "lib": ["DOM", "ES2021"],
     "types": ["node"]
   },
-  "include": ["**/*.ts"]
+  "include": ["src/**/*.ts"]
 }
