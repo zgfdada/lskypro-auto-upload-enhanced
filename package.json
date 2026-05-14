@@ -1,8 +1,8 @@
 {
-  "name": "lskypro-auto-upload",
+  "name": "lskypro-auto-upload-enhanced",
   "version": "1.1.0",
   "type": "module",
-  "description": "Auto upload images from clipboard to lskypro",
+  "description": "Upload local and remote note images to Lsky Pro with download, context-menu, and progress support",
   "main": "main.js",
   "scripts": {
     "dev": "rollup --config rollup.config.js -w",
@@ -14,7 +14,7 @@
     "upload",
     "auto"
   ],
-  "author": "nekoutarou",
+  "author": "zgfdada",
   "license": "MIT",
   "devDependencies": {
     "@rollup/plugin-commonjs": "^24.1.0",

@@ -1,6 +1,6 @@
-# Obsidian LskyPro Auto Upload Plugin
+# Obsidian LskyPro Auto Upload Enhanced
 
-An Obsidian plugin for uploading images to [Lsky Pro](https://github.com/lsky-org/lsky-pro). This fork keeps the original clipboard and drag/drop workflow, and adds a more maintainable implementation for mixed local/remote image handling.
+An Obsidian plugin for uploading images to [Lsky Pro](https://github.com/lsky-org/lsky-pro). This maintained fork keeps the original clipboard and drag/drop workflow, and adds a cleaner implementation for local images, remote images, context-menu actions, and progress reporting.
 
 ## What This Fork Adds
 
@@ -16,13 +16,12 @@ An Obsidian plugin for uploading images to [Lsky Pro](https://github.com/lsky-or
   - Leave it empty to follow Obsidian's attachment folder setting
 - `Download all images` now replaces remote links with note-relative local links
 - File and editor context-menu action:
-  - `上传当前文件图片到兰空（自动处理远程图）`
-- When uploading the current note:
-  - remote images are downloaded first
-  - then uploaded to Lsky
-  - then links in the note are replaced with Lsky URLs
-- Single floating progress notice during current-note upload
-  - shows total, current progress, success count, failure count, current file, and last error
+  - `Upload current note images to Lsky (auto-handle remote images)`
+- Current-note upload flow now:
+  - downloads remote images first
+  - uploads images one by one
+  - replaces note links with Lsky URLs
+  - shows a single floating progress notice with success/failure details
 
 ## Install
 
@@ -36,7 +35,7 @@ npm run build
 Copy the generated plugin files into:
 
 ```text
-<your-vault>/.obsidian/plugins/lskypro-auto-upload
+<your-vault>/.obsidian/plugins/lskypro-auto-upload-enhanced
 ```
 
 Then reload Obsidian.
@@ -46,26 +45,26 @@ Then reload Obsidian.
 Open:
 
 ```text
-Settings -> Community plugins -> Image To Lskypro
+Settings -> Community plugins -> Image To Lskypro Enhanced
 ```
 
 Important settings:
 
 - `LskyPro 域名`
-  - only fill the site base URL
-  - example: `https://lsky.example.com`
+  - Only fill the site base URL
+  - Example: `https://lsky.example.com`
 - `LskyPro Token`
-  - for new Lsky Pro: fill API token
-  - for old Lsky Pro: fill the 32-character token from the user settings page
+  - For new Lsky Pro: fill API token
+  - For old Lsky Pro: fill the 32-character token from the user settings page
 - `图片下载目录`
-  - leave empty to follow Obsidian attachment folder
-  - or set a dedicated folder such as `attachments/clippings`
+  - Leave empty to follow Obsidian attachment folder
+  - Or set a dedicated folder such as `attachments/clippings`
 - `Delete source file after you upload file`
-  - deletes local source files after upload succeeds
+  - Deletes local source files after upload succeeds
 
 ## Commands
 
-### Upload all images-All images in the current file
+### `Upload all images-All images in the current file`
 
 Uploads images referenced in the current note.
 
@@ -74,11 +73,11 @@ Uploads images referenced in the current note.
 - Links are replaced with Lsky URLs
 - A floating progress notice is shown during processing
 
-### Download all images
+### `Download all images`
 
 Downloads remote images referenced in the current note into the configured download folder, then replaces the note links with local relative links.
 
-### Upload all images - All notes in vault (reuse)
+### `Upload all images - All notes in vault (reuse)`
 
 Runs the current-note upload logic across all Markdown notes in the vault.
 
@@ -87,7 +86,7 @@ Runs the current-note upload logic across all Markdown notes in the vault.
 This fork adds a context-menu entry for Markdown notes:
 
 ```text
-上传当前文件图片到兰空（自动处理远程图）
+Upload current note images to Lsky (auto-handle remote images)
 ```
 
 It appears in:

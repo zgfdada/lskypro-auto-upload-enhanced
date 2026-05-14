@@ -1,6 +1,6 @@
-# Obsidian LskyPro Auto Upload Plugin
+# Obsidian LskyPro Auto Upload Enhanced
 
-这是一个把图片上传到 [Lsky Pro](https://github.com/lsky-org/lsky-pro) 的 Obsidian 插件。本 fork 在原项目基础上保留了剪贴板上传和拖拽上传，同时把“本地图片 + 远程图片 + 兰空兼容性”这一条链路整理成了更可维护的实现。
+这是一个把图片上传到 [Lsky Pro](https://github.com/lsky-org/lsky-pro) 的 Obsidian 插件。本 fork 在原项目基础上保留了剪贴板上传和拖拽上传，同时把“本地图片 + 远程图片 + 右键菜单 + 进度提示”这一整条链路整理成了更可维护的实现。
 
 ## 这个 Fork 新增了什么
 
@@ -15,14 +15,12 @@
 - 新增“图片下载目录”配置
   - 留空时跟随 Obsidian 附件目录
 - `Download all images` 现在会把远程图片下载到本地后，替换成对当前笔记可用的相对链接
-- 新增右键菜单：
-  - `上传当前文件图片到兰空（自动处理远程图）`
+- 新增文件树和编辑器右键菜单
 - 上传当前笔记图片时：
   - 遇到远程图片会先下载到本地
-  - 再上传到兰空
+  - 再逐张上传到兰空
   - 最后把笔记中的链接替换成兰空链接
-- 当前笔记上传时新增单个持续更新的浮动通知
-  - 显示总数、当前进度、成功数、失败数、当前图片名、最后一条错误
+  - 整个过程通过单个浮动通知显示进度和错误
 
 ## 安装
 
@@ -36,7 +34,7 @@ npm run build
 把生成的插件文件放到：
 
 ```text
-<你的 vault>/.obsidian/plugins/lskypro-auto-upload
+<你的 vault>/.obsidian/plugins/lskypro-auto-upload-enhanced
 ```
 
 然后重载或重启 Obsidian。
@@ -46,7 +44,7 @@ npm run build
 打开：
 
 ```text
-设置 -> 第三方插件 -> Image To Lskypro
+设置 -> 第三方插件 -> Image To Lskypro Enhanced
 ```
 
 重点配置项：
@@ -65,7 +63,7 @@ npm run build
 
 ## 命令
 
-### Upload all images-All images in the current file
+### `Upload all images-All images in the current file`
 
 上传当前笔记中引用的图片。
 
@@ -74,11 +72,11 @@ npm run build
 - 笔记中的图片链接会被替换成兰空链接
 - 处理过程中会显示浮动进度通知
 
-### Download all images
+### `Download all images`
 
 把当前笔记中的远程图片下载到配置的目录，并替换成当前笔记可用的本地相对链接。
 
-### Upload all images - All notes in vault (reuse)
+### `Upload all images - All notes in vault (reuse)`
 
 把“当前笔记上传”这套逻辑复用到整个 vault 的所有 Markdown 笔记。
 
@@ -87,7 +85,7 @@ npm run build
 本 fork 为 Markdown 笔记新增了右键菜单：
 
 ```text
-上传当前文件图片到兰空（自动处理远程图）
+Upload current note images to Lsky (auto-handle remote images)
 ```
 
 会出现在：
